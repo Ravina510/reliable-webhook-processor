@@ -1,0 +1,18 @@
+﻿{
+  "name": "reliable-webhook-processor",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@rwp/db && npm run build --workspace=@rwp/api && npm run build --workspace=@rwp/worker && npm run build --workspace=@rwp/web",
+    "migrate": "node packages/db/dist/migrate.js",
+    "test": "node --test --import tsx test/integration.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  }
+}
