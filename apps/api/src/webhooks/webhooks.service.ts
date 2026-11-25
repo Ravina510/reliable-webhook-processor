@@ -1,4 +1,4 @@
-﻿import { Inject, Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { Pool } from '@rwp/db';
 import { IngestWebhookDto } from './dto/ingest-webhook.dto';
 

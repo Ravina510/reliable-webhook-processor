@@ -1,4 +1,4 @@
-﻿DO $$ BEGIN
+DO $$ BEGIN
   CREATE TYPE event_status AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED');
 EXCEPTION
   WHEN duplicate_object THEN NULL;

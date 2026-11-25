@@ -1,4 +1,4 @@
-﻿export type SimulationMode =
+export type SimulationMode =
   | { kind: 'ok' }
   | { kind: 'fail_then_succeed'; failCount: number }
   | { kind: 'always_fail' }

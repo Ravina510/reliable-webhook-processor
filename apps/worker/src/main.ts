@@ -1,4 +1,4 @@
-﻿import { createPool } from '@rwp/db';
+import { createPool } from '@rwp/db';
 import { processOnce, WorkerConfig } from './processor';
 
 function sleep(ms: number): Promise<void> {

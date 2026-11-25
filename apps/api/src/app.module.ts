@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { createPool } from '@rwp/db';
 import { HealthController } from './health.controller';
 import { WebhooksController } from './webhooks/webhooks.controller';

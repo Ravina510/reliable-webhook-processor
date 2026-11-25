@@ -1,4 +1,4 @@
-﻿FROM node:22-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/tsconfig.json ./apps/web/

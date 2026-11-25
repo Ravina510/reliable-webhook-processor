@@ -1,4 +1,4 @@
-﻿import { Pool } from '@rwp/db';
+import { Pool } from '@rwp/db';
 import { executeSimulation, parseSimulation } from './simulate';
 
 export interface WorkerConfig {
