@@ -16,6 +16,13 @@ interface ClaimedEventRow {
   max_attempts: number;
 }
 
+class LeaseLostError extends Error {
+  constructor(eventId: string, workerId: string) {
+    super(`Worker ${workerId} lost lease for event ${eventId}`);
+    this.name = 'LeaseLostError';
+  }
+}
+
 export async function claimNextEvent(
   pool: Pool,
   workerId: string,
@@ -65,8 +72,8 @@ async function renewLease(
   eventId: string,
   workerId: string,
   leaseDurationMs: number,
-): Promise<void> {
-  await pool.query(
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
     `
     UPDATE webhook_events
     SET lease_expires_at = NOW() + ($3 * INTERVAL '1 millisecond'),
@@ -77,6 +84,7 @@ async function renewLease(
     `,
     [eventId, workerId, leaseDurationMs],
   );
+  return (rowCount ?? 0) > 0;
 }
 
 async function recordAttemptStart(
@@ -145,9 +153,31 @@ export async function processOnce(pool: Pool, cfg: WorkerConfig): Promise<boolea
     await executeSimulation(sim, attemptNumber, async () => {
       if (Date.now() - lastHeartbeat >= Math.max(250, Math.floor(cfg.leaseDurationMs / 3))) {
         lastHeartbeat = Date.now();
-        await renewLease(pool, job.event_id, cfg.workerId, cfg.leaseDurationMs);
+        const renewed = await renewLease(pool, job.event_id, cfg.workerId, cfg.leaseDurationMs);
+        if (!renewed) {
+          throw new LeaseLostError(job.event_id, cfg.workerId);
+        }
       }
     });
+
+    const { rowCount: completedCount } = await pool.query(
+      `
+      UPDATE webhook_events
+      SET status = 'COMPLETED',
+          locked_by = NULL,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          updated_at = NOW()
+      WHERE event_id = $1
+        AND locked_by = $2
+        AND status = 'PROCESSING'
+      `,
+      [job.event_id, cfg.workerId],
+    );
+
+    if ((completedCount ?? 0) === 0) {
+      throw new LeaseLostError(job.event_id, cfg.workerId);
+    }
 
     await pool.query(
       `
@@ -158,24 +188,18 @@ export async function processOnce(pool: Pool, cfg: WorkerConfig): Promise<boolea
       [orderId, job.event_id],
     );
 
-    await pool.query(
-      `
-      UPDATE webhook_events
-      SET status = 'COMPLETED',
-          locked_by = NULL,
-          lease_expires_at = NULL,
-          last_error = NULL,
-          updated_at = NOW()
-      WHERE event_id = $1
-      `,
-      [job.event_id],
-    );
-
     await recordAttemptFinish(pool, job.event_id, attemptNumber, 'SUCCESS', null);
     console.log(`[${cfg.workerId}] COMPLETED ${job.event_id} (attempt ${attemptNumber})`);
     return true;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+
+    if (err instanceof LeaseLostError) {
+      await recordAttemptFinish(pool, job.event_id, attemptNumber, 'FAILED', message);
+      console.warn(`[${cfg.workerId}] ${message} (attempt ${attemptNumber})`);
+      return true;
+    }
+
     const exhausted = attemptNumber >= job.max_attempts;
 
     if (exhausted) {
@@ -188,10 +212,14 @@ export async function processOnce(pool: Pool, cfg: WorkerConfig): Promise<boolea
             last_error = $2,
             updated_at = NOW()
         WHERE event_id = $1
+          AND locked_by = $3
+          AND status = 'PROCESSING'
         `,
-        [job.event_id, message],
+        [job.event_id, message, cfg.workerId],
       );
-      console.warn(`[${cfg.workerId}] FAILED permanently ${job.event_id} (attempt ${attemptNumber}/${job.max_attempts}): ${message}`);
+      console.warn(
+        `[${cfg.workerId}] FAILED permanently ${job.event_id} (attempt ${attemptNumber}/${job.max_attempts}): ${message}`,
+      );
     } else {
       const delayMs = computeBackoffMs(attemptNumber, cfg.baseBackoffMs, cfg.maxBackoffMs);
       await pool.query(
@@ -204,10 +232,14 @@ export async function processOnce(pool: Pool, cfg: WorkerConfig): Promise<boolea
             last_error = $3,
             updated_at = NOW()
         WHERE event_id = $1
+          AND locked_by = $4
+          AND status = 'PROCESSING'
         `,
-        [job.event_id, delayMs, message],
+        [job.event_id, delayMs, message, cfg.workerId],
       );
-      console.log(`[${cfg.workerId}] RETRY scheduled for ${job.event_id} in ${delayMs}ms (attempt ${attemptNumber}/${job.max_attempts}): ${message}`);
+      console.log(
+        `[${cfg.workerId}] RETRY scheduled for ${job.event_id} in ${delayMs}ms (attempt ${attemptNumber}/${job.max_attempts}): ${message}`,
+      );
     }
 
     await recordAttemptFinish(pool, job.event_id, attemptNumber, 'FAILED', message);
